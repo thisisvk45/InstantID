@@ -3,7 +3,6 @@ title: Facial Identity Persistence
 colorFrom: blue
 colorTo: purple
 sdk: docker
-sdk_version: 4.0.0
 app_file: app.py
 pinned: true
 ---
@@ -11,72 +10,84 @@ pinned: true
 # Facial Identity Persistence System
 
 Multi-image facial identity aggregation for consistent identity-preserving image generation.
+Built on top of InstantID (Wang et al., 2024) with novel contributions in embedding fusion and persistent identity storage.
 
-## Abstract
+## The Problem
 
-Current identity-preserving image generation methods such as InstantID rely on a
-single reference image to extract a facial embedding, which introduces instability
-when the reference image has suboptimal lighting, pose, or occlusion. This project
-proposes a multi-image identity aggregation system that extracts ArcFace embeddings
-from 4-5 reference images and fuses them into a single robust master identity vector
-using confidence-weighted averaging. The aggregated embedding is stored persistently
-and retrieved at generation time to condition a Stable Diffusion XL pipeline via
-InstantID's IdentityNet and IP-Adapter modules.
+State-of-the-art identity-preserving generation models like InstantID condition on a single reference image. This creates three failure modes:
 
-## Problem Statement
+- A single image with poor lighting, occlusion, or extreme pose produces a degraded embedding
+- The embedding is biased toward one viewpoint and expression
+- There is no way to persist or reuse an identity across sessions without re-running extraction
 
-When a single reference image is used for identity-conditioned generation:
-- Poor lighting or occlusion degrades embedding quality
-- A single pose biases the embedding toward that viewpoint
-- There is no mechanism to refine identity representation over time
+## What This System Does Differently
 
-## Proposed Solution
+This project introduces a multi-image identity aggregation layer on top of InstantID:
 
-Aggregate embeddings across multiple images of the same person:
-- Extract 512-dim L2-normalized ArcFace embedding per image via InsightFace
-- Weight each embedding by face detection confidence score
-- Compute weighted average and re-normalize to unit sphere
-- Store master embedding as a persistent JSON record keyed by identity name
-- Retrieve at generation time with no re-extraction needed
+- Accepts 4-5 reference images of the same person
+- Extracts a 512-dim ArcFace embedding from each image using InsightFace
+- Fuses embeddings using confidence-weighted averaging weighted by face detection confidence score
+- Re-normalizes the fused vector to the unit sphere
+- Persists the master identity vector in a structured store keyed by name
+- Retrieves the stored identity at generation time with no re-extraction needed
 
-## System Architecture
+## Architecture
 
 ```
-Input: 4-5 face images
-       |
+4-5 Reference Images
+        |
 InsightFace ArcFace antelopev2
-       |
+        |
 Per-image 512-dim embedding + detection confidence score
-       |
-Confidence-weighted averaging + L2 normalization
-       |
-Master Identity Vector (512-dim)
-       |
-Persistent Identity Store (JSON)
-       |
-InstantID Pipeline: IdentityNet + IP-Adapter + SDXL
-       |
-Output: Identity-preserved generated image
+        |
+Confidence-weighted average + L2 normalization
+        |
+Master Identity Vector 512-dim
+        |
+Persistent Identity Store JSON
+        |
+InstantID Pipeline
+  |- IdentityNet spatial conditioning via facial keypoints
+  |- IP-Adapter semantic conditioning via face tokens
+  |- Stable Diffusion XL
+        |
+Identity-preserved output image
 ```
+
+## Novel Contributions Over Base InstantID
+
+| Aspect | Base InstantID | This System |
+|---|---|---|
+| Reference images | 1 | 4-5 |
+| Embedding fusion | None | Confidence-weighted average |
+| Identity persistence | None | JSON store keyed by name |
+| Cross-session reuse | Not supported | Supported |
+| Pipeline modification | Required | Zero, drop-in replacement |
 
 ## Key Files
 
-- `identity_store.py`: embedding extraction, aggregation, persistence
-- `infer_multi.py`: CLI inference with saved identity support
-- `gradio_demo/app_multi.py`: two-tab Gradio UI
+| File | Description |
+|---|---|
+| identity_store.py | Embedding extraction, confidence-weighted aggregation, persistent storage |
+| infer_multi.py | CLI inference supporting multi-image input and saved identity retrieval |
+| gradio_demo/app_multi.py | Two-tab Gradio UI for identity creation and generation |
 
-## Novel Contributions over Base InstantID
+## Usage
 
-1. Multi-image embedding aggregation vs single image
-2. Confidence-weighted fusion vs equal weighting
-3. Persistent identity store enabling cross-session reuse
-4. Decoupled identity extraction from generation pipeline
+Save a new identity:
+```
+python infer_multi.py --images "img1.jpg,img2.jpg,img3.jpg" --save_as "john" --prompt "a man in a suit" --output outputs/john_suit.png
+```
+
+Generate using a saved identity:
+```
+python infer_multi.py --identity "john" --prompt "a man as an astronaut" --output outputs/john_astro.png
+```
 
 ## Planned Evaluations
 
-- Cosine similarity between source and generated face embeddings
-- Stability comparison: single-image vs multi-image embedding across
-  varying reference image quality
+- Cosine similarity between source and generated face embeddings across single vs multi-image baselines
+- Embedding stability under varying reference image quality
 - Ablation: equal weighting vs confidence weighting vs PCA-based fusion
 
 ## References
@@ -84,6 +95,7 @@ Output: Identity-preserved generated image
 - InstantID: Wang et al., 2024. arXiv:2401.07519
 - ArcFace: Deng et al., 2019. arXiv:1801.07698
 - Stable Diffusion XL: Podell et al., 2023. arXiv:2307.01952
+- InsightFace: github.com/deepinsight/insightface
 
 ## Citation
 
