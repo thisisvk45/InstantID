@@ -15,8 +15,6 @@ COPY . .
 RUN pip install --upgrade pip
 RUN pip install -r gradio_demo/requirements.txt
 
-RUN python gradio_demo/download_models.py
-
 EXPOSE 7860
 
 CMD ["python", "app.py"]
